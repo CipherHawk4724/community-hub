@@ -1,67 +1,149 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ethers } from "ethers";
 import WalletConnect from "../../components/WalletConnect";
+import ProposalCard from "../../components/ProposalCard";
 
-type Proposal = {
+const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
+const SHARDEUM_CHAIN_ID = "0x1F40"; // 8080 in hex
+
+import CommunityHubABI from "../../abi/CommunityHub.json";
+
+interface Proposal {
   id: number;
+  creator: string;
+  beneficiary: string;
   description: string;
-  votes: number;
-};
+  votesYes: number;
+  votesNo: number;
+  donated: string;
+  createdAt: number;
+  open: boolean;
+}
 
 export default function VotePage() {
-  const [proposals, setProposals] = useState<Proposal[]>([
-    { id: 1, description: "Fund community clean water project", votes: 12 },
-    { id: 2, description: "Support local coding bootcamp", votes: 7 },
-    { id: 3, description: "Organize mental health awareness event", votes: 20 },
-  ]);
+  const [account, setAccount] = useState<string>("");
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const handleVote = (id: number) => {
-    // 🔗 Later: call smart contract vote(id)
-    setProposals((prev) =>
-      prev.map((p) =>
-        p.id === id ? { ...p, votes: p.votes + 1 } : p
-      )
+  const addShardeumNetwork = async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: SHARDEUM_CHAIN_ID,
+            chainName: "Shardeum Unstablenet",
+            rpcUrls: ["https://api-unstable.shardeum.org"],
+            nativeCurrency: { name: "SHM", symbol: "SHM", decimals: 18 },
+            blockExplorerUrls: ["https://explorer-unstable.shardeum.org/"],
+          },
+        ],
+      });
+    } catch (error) {
+      console.error("Failed to add Shardeum network:", error);
+    }
+  };
+
+  const switchToShardeum = async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: SHARDEUM_CHAIN_ID }],
+      });
+    } catch (switchError: any) {
+      if (switchError.code === 4902) {
+        await addShardeumNetwork();
+      } else {
+        console.error("Failed to switch network:", switchError);
+      }
+    }
+  };
+
+  const connectWallet = async () => {
+    if (!window.ethereum) return alert("Install MetaMask!");
+    await switchToShardeum();
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const signer = await provider.getSigner();
+    const address = await signer.getAddress();
+    setAccount(address);
+
+    const contractInstance = new ethers.Contract(
+      CONTRACT_ADDRESS,
+      CommunityHubABI,
+      signer
     );
+    setContract(contractInstance);
+  };
+
+  const fetchProposals = async () => {
+    if (!contract) return;
+    try {
+      const list = await contract.listProposals(1, 100);
+      const formatted: Proposal[] = list.map((p: any) => ({
+        id: Number(p.id),
+        creator: p.creator,
+        beneficiary: p.beneficiary,
+        description: p.description,
+        votesYes: Number(p.votesYes),
+        votesNo: Number(p.votesNo),
+        donated: ethers.formatEther(p.donated),
+        createdAt: Number(p.createdAt),
+        open: p.open,
+      }));
+      setProposals(formatted);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    if (contract) fetchProposals();
+  }, [contract]);
+
+  const handleVote = async (id: number, support: boolean) => {
+    if (!contract) return;
+    try {
+      setLoading(true);
+      const tx = await contract.vote(id, support);
+      await tx.wait();
+      alert("Vote submitted successfully!");
+      fetchProposals();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to vote.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Wallet Connection */}
-      <div className="flex justify-end">
-        <WalletConnect />
-      </div>
+    <div className="min-h-screen bg-gray-100 py-8 px-4">
+      <WalletConnect connectWallet={connectWallet} account={account} />
 
-      {/* Page Header */}
-      <h1 className="text-2xl font-bold">Vote on Proposals</h1>
+      <div className="max-w-5xl mx-auto">
+        <h1 className="text-3xl font-bold mb-6 text-center">Vote on Proposals</h1>
 
-      {/* Proposals List */}
-      <div className="space-y-4">
-        {proposals.length > 0 ? (
-          proposals.map((proposal) => (
-            <div
-              key={proposal.id}
-              className="flex justify-between items-center border rounded-lg p-4 bg-white shadow"
-            >
-              <div>
-                <h2 className="text-lg font-semibold">
-                  Proposal #{proposal.id}
-                </h2>
-                <p>{proposal.description}</p>
-                <p className="text-sm text-gray-600">
-                  Votes: {proposal.votes}
-                </p>
-              </div>
-              <button
-                onClick={() => handleVote(proposal.id)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-              >
-                Vote
-              </button>
-            </div>
-          ))
+        {proposals.length === 0 ? (
+          <p className="text-center text-gray-500">No proposals available for voting.</p>
         ) : (
-          <p>No proposals to vote on.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {proposals.map((proposal) => (
+              <ProposalCard
+                key={proposal.id}
+                proposal={proposal}
+                contract={contract}
+                onVote={handleVote}
+                loading={loading}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>

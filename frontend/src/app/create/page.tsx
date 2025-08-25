@@ -1,60 +1,140 @@
 "use client";
 
 import { useState } from "react";
+import { ethers } from "ethers";
 import WalletConnect from "../../components/WalletConnect";
+import CommunityHubABI from "../../abi/CommunityHub.json";
+
+const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
+const BANKAI_CHAIN_ID = "0x1F40"; // 9090 in hex
 
 export default function CreateProposalPage() {
   const [description, setDescription] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const [beneficiary, setBeneficiary] = useState("");
+  const [account, setAccount] = useState<string>("");
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!description.trim()) {
-      alert("Please enter a proposal description.");
-      return;
+  // Add Bankai Testnet if missing
+  // Add Shardeum network if missing
+  const addShardeumNetwork = async () => {
+    if (!window.ethereum) return;
+    try {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: BANKAI_CHAIN_ID,
+            chainName: "Shardeum Liberty 1.X",
+            rpcUrls: ["https://api-unstable.shardeum.org/"],
+            nativeCurrency: { name: "Shardeum", symbol: "SHM", decimals: 18 },
+            blockExplorerUrls: ["https://explorer-unstable.shardeum.org/"],
+          },
+        ],
+      });
+      console.log("Shardeum network added successfully!");
+    } catch (error) {
+      console.error("Failed to add Shardeum network:", error);
     }
+  };
 
-    // 🔗 Later: call smart contract function createProposal(description)
-    console.log("New proposal created:", description);
+  // Switch to Bankai Testnet
+  const switchToBankai = async () => {
+    if (!window.ethereum) return;
+    try {
+      const currentChainId = await window.ethereum.request({ method: "eth_chainId" });
+      if (currentChainId === BANKAI_CHAIN_ID) return; // Already on Bankai
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: BANKAI_CHAIN_ID }],
+      });
+    } catch (switchError: any) {
+      if (switchError.code === 4902) {
+        // Chain not added
+        await addShardeumNetwork();
+        await switchToBankai(); // try switching again
+      } else {
+        console.error("Failed to switch network. Make sure Bankai is added in MetaMask.", switchError);
+      }
+    }
+  };
 
-    setSubmitted(true);
-    setDescription("");
+  // Connect wallet
+  const connectWallet = async () => {
+    if (!window.ethereum) return alert("Please install MetaMask!");
+    await switchToBankai();
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const signer = await provider.getSigner();
+    const address = await signer.getAddress();
+    setAccount(address);
+
+    const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CommunityHubABI, signer);
+    setContract(contractInstance);
+  };
+
+  // Create proposal
+  const handleCreateProposal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!contract) return alert("Connect your wallet first!");
+    if (!description || !beneficiary) return alert("Please fill all fields!");
+
+    try {
+      setLoading(true);
+      const tx = await contract.createProposal(description, beneficiary);
+      await tx.wait();
+      alert("Proposal created successfully!");
+      setDescription("");
+      setBeneficiary("");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to create proposal.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      {/* Wallet Connection */}
-      <div className="flex justify-end">
-        <WalletConnect />
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center py-10 px-4">
+      <WalletConnect connectWallet={connectWallet} account={account} />
+
+      <div className="w-full max-w-lg bg-white p-8 rounded-xl shadow-md">
+        <h2 className="text-2xl font-bold mb-6 text-center">Create a Proposal</h2>
+
+        <form onSubmit={handleCreateProposal} className="space-y-4">
+          <div>
+            <label className="block text-gray-700 font-medium mb-1">Description</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full border border-gray-300 rounded-md p-2"
+              placeholder="Describe your proposal..."
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-gray-700 font-medium mb-1">Beneficiary Address</label>
+            <input
+              type="text"
+              value={beneficiary}
+              onChange={(e) => setBeneficiary(e.target.value)}
+              className="w-full border border-gray-300 rounded-md p-2"
+              placeholder="0x..."
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition"
+          >
+            {loading ? "Creating..." : "Create Proposal"}
+          </button>
+        </form>
       </div>
-
-      {/* Page Header */}
-      <h1 className="text-2xl font-bold">Create a New Proposal</h1>
-
-      {/* Proposal Form */}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Enter your proposal description..."
-          className="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          rows={4}
-        />
-        <button
-          type="submit"
-          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Submit Proposal
-        </button>
-      </form>
-
-      {/* Confirmation Message */}
-      {submitted && (
-        <p className="text-green-600 font-medium">
-          ✅ Proposal submitted successfully (not yet saved to blockchain).
-        </p>
-      )}
     </div>
   );
 }

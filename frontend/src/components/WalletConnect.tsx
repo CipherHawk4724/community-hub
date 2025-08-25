@@ -1,39 +1,66 @@
 "use client";
-import { useState } from "react";
-import { ethers } from "ethers";
 
-export default function WalletConnect() {
-  const [account, setAccount] = useState<string | null>(null);
+import React, { useEffect, useState } from "react";
 
-  async function connectWallet() {
-    if (typeof window.ethereum === "undefined") {
-      alert("Please install MetaMask!");
-      return;
+interface WalletConnectProps {
+  connectWallet: () => Promise<void>;
+  account: string;
+}
+
+const BANKAI_CHAIN_ID = "0x1F40"; // 9090 in hex
+
+const WalletConnect: React.FC<WalletConnectProps> = ({ connectWallet, account }) => {
+  const [wrongNetwork, setWrongNetwork] = useState(false);
+
+  useEffect(() => {
+    const checkNetwork = async () => {
+      if (window.ethereum && account) {
+        try {
+          const chainId = await window.ethereum.request({ method: "eth_chainId" });
+          setWrongNetwork(chainId !== BANKAI_CHAIN_ID);
+        } catch (err) {
+          console.error("Failed to get chainId:", err);
+          setWrongNetwork(true);
+        }
+      } else {
+        setWrongNetwork(false);
+      }
+    };
+
+    checkNetwork();
+
+    if (window.ethereum) {
+      window.ethereum.on("chainChanged", checkNetwork);
     }
 
-    try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const accounts = await provider.send("eth_requestAccounts", []);
-      setAccount(accounts[0]);
-    } catch (err) {
-      console.error(err);
-    }
-  }
+    return () => {
+      if (window.ethereum) {
+        window.ethereum.removeListener("chainChanged", checkNetwork);
+      }
+    };
+  }, [account]);
 
   return (
-    <div>
+    <div className="bg-white shadow p-4 flex justify-end items-center space-x-4">
       {account ? (
-        <p className="text-green-600 font-semibold">
-          Connected: {account.slice(0, 6)}...{account.slice(-4)}
-        </p>
+        <>
+          <div className="text-gray-700 font-semibold">
+            Connected: {account.slice(0, 6)}...{account.slice(-4)}
+          </div>
+          {wrongNetwork && (
+            <div className="text-red-600 font-semibold">Wrong Network!</div>
+          )}
+        </>
       ) : (
         <button
           onClick={connectWallet}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg"
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition"
         >
           Connect Wallet
         </button>
       )}
     </div>
   );
-}
+};
+
+export default WalletConnect;

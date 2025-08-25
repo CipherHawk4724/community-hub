@@ -1,41 +1,98 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ethers, Interface, InterfaceAbi } from "ethers";
 import ProposalCard from "../components/ProposalCard";
 import WalletConnect from "../components/WalletConnect";
 
-// Define Proposal type
-type Proposal = {
+const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
+
+import CommunityHubABI from "../abi/CommunityHub.json";
+
+interface Proposal {
   id: number;
+  creator: string;
+  beneficiary: string;
   description: string;
-  votes: number;
-  donations: number;
-};
+  votesYes: number;
+  votesNo: number;
+  donated: string;
+  createdAt: number;
+  open: boolean;
+}
 
 export default function HomePage() {
-  // Dummy proposals for now (later fetched from smart contract)
-  const [proposals] = useState<Proposal[]>([
-    { id: 1, description: "Fund community clean water project", votes: 12, donations: 3 },
-    { id: 2, description: "Support local coding bootcamp", votes: 7, donations: 5 },
-    { id: 3, description: "Organize mental health awareness event", votes: 20, donations: 8 },
-  ]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
+  const [signer, setSigner] = useState<ethers.Signer | null>(null);
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+  const [account, setAccount] = useState<string>("");
+
+const connectWallet = async () => {
+  if (typeof window.ethereum !== "undefined") {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    const signer = await provider.getSigner();
+    const address = await signer.getAddress();
+
+    setProvider(provider);
+    setSigner(signer);
+    setAccount(address);
+
+    // Pass ABI array directly
+    const contract = new ethers.Contract(
+      CONTRACT_ADDRESS,
+      CommunityHubABI, // already an array
+      signer
+    );
+    setContract(contract);
+  } else {
+    alert("Please install MetaMask!");
+  }
+};
+
+
+
+  const fetchProposals = async () => {
+    if (!contract) return;
+    try {
+      const list = await contract.listProposals(1, 100);
+      const formatted: Proposal[] = list.map((p: any) => ({
+        id: Number(p.id),
+        creator: p.creator,
+        beneficiary: p.beneficiary,
+        description: p.description,
+        votesYes: Number(p.votesYes),
+        votesNo: Number(p.votesNo),
+        donated: ethers.formatEther(p.donated),
+        createdAt: Number(p.createdAt),
+        open: p.open,
+      }));
+      setProposals(formatted);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  useEffect(() => {
+    if (contract) fetchProposals();
+  }, [contract]);
 
   return (
-    <div className="space-y-6">
-      {/* Wallet Connection */}
-      <div className="flex justify-end">
-        <WalletConnect />
-      </div>
+    <div className="min-h-screen bg-gray-100">
+      <WalletConnect connectWallet={connectWallet} account={account} />
 
-      {/* Page Header */}
-      <h1 className="text-2xl font-bold">Community Proposals</h1>
+      <div className="max-w-5xl mx-auto py-8 px-4">
+        <h1 className="text-3xl font-bold mb-6 text-center">Community Hub</h1>
 
-      {/* Proposals List */}
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {proposals.length > 0 ? (
-          proposals.map((p) => <ProposalCard key={p.id} proposal={p} />)
+        {proposals.length === 0 ? (
+          <p className="text-center text-gray-500">No proposals yet. Create one!</p>
         ) : (
-          <p>No proposals yet. Be the first to create one!</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {proposals.map((proposal) => (
+              <ProposalCard key={proposal.id} proposal={proposal} contract={contract} />
+            ))}
+          </div>
         )}
       </div>
     </div>

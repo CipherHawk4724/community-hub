@@ -1,10 +1,12 @@
-import type { Metadata } from "next";
 import "./globals.css";
+import { Inter } from "next/font/google";
 import Navbar from "../components/Navbar";
 
-export const metadata: Metadata = {
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata = {
   title: "Community Hub",
-  description: "Decentralized community hub for proposals, voting, and donations",
+  description: "Decentralized Community Hub - Hackathon Project",
 };
 
 export default function RootLayout({
@@ -14,9 +16,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="bg-gray-100">
+      <body className={inter.className + " bg-gray-100 min-h-screen"}>
         <Navbar />
-        <main className="p-6">{children}</main>
+        <main className="pt-4">{children}</main>
       </body>
     </html>
   );
