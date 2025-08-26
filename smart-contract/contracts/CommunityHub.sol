@@ -141,13 +141,24 @@ contract CommunityHub {
     // List proposals by range (for frontend pagination)
     function listProposals(uint256 fromId, uint256 toId) external view returns (Proposal[] memory) {
         require(toId >= fromId, "Invalid range");
-        uint256 length = toId - fromId + 1;
-        Proposal[] memory arr = new Proposal[](length);
 
+        uint256 length = toId - fromId + 1;
+        uint256 count = 0;
+
+        // Count valid proposals
         for (uint256 i = 0; i < length; i++) {
-            arr[i] = proposals[fromId + i];
+            if (proposals[fromId + i].createdAt != 0) count++;
         }
 
+        Proposal[] memory arr = new Proposal[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < length; i++) {
+            Proposal storage p = proposals[fromId + i];
+            if (p.createdAt != 0) {
+                arr[index++] = p;
+            }
+        }
         return arr;
     }
+
 }

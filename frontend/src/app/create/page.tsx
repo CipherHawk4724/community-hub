@@ -1,140 +1,188 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ethers } from "ethers";
-import WalletConnect from "../../components/WalletConnect";
-import CommunityHubABI from "../../abi/CommunityHub.json";
+import Navbar from "components/Navbar";
 
-const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
-const BANKAI_CHAIN_ID = "0x1F40"; // 9090 in hex
+// Deployed CommunityHub contract address on Shardeum testnet
+const COMMUNITY_HUB_ADDRESS = "0xd927807767655E6e818af8EBbCf6cf41890E253c";
 
-export default function CreateProposalPage() {
+// Minimal ABI for createProposal
+const COMMUNITY_HUB_ABI = [
+  "function createProposal(string calldata description, address payable beneficiary) external returns (uint256)"
+];
+
+// Shardeum network details
+const SHARDEUM_NETWORK_PARAMS = {
+  chainId: "0x1F90", // 8080 in hex, example for Shardeum Unstable
+  chainName: "Shardeum Unstable",
+  nativeCurrency: {
+    name: "Shardeum",
+    symbol: "SHM",
+    decimals: 18,
+  },
+  rpcUrls: ["https://api-unstable.shardeum.org"],
+  blockExplorerUrls: ["https://explorer-unstable.shardeum.org"],
+};
+
+const CreateProposalPage: React.FC = () => {
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [beneficiary, setBeneficiary] = useState("");
-  const [account, setAccount] = useState<string>("");
-  const [contract, setContract] = useState<ethers.Contract | null>(null);
   const [loading, setLoading] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Add Bankai Testnet if missing
-  // Add Shardeum network if missing
-  const addShardeumNetwork = async () => {
-    if (!window.ethereum) return;
+  // Auto-connect wallet on page load
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.request({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          if (accounts.length > 0) setWalletAddress(accounts[0]);
+        })
+        .catch(console.error);
+    }
+  }, []);
+
+  // Switch network to Shardeum if not already
+  const switchToShardeum = async () => {
+    if (!window.ethereum) throw new Error("MetaMask not installed");
     try {
       await window.ethereum.request({
         method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: BANKAI_CHAIN_ID,
-            chainName: "Shardeum Liberty 1.X",
-            rpcUrls: ["https://api-unstable.shardeum.org/"],
-            nativeCurrency: { name: "Shardeum", symbol: "SHM", decimals: 18 },
-            blockExplorerUrls: ["https://explorer-unstable.shardeum.org/"],
-          },
-        ],
+        params: [SHARDEUM_NETWORK_PARAMS],
       });
-      console.log("Shardeum network added successfully!");
-    } catch (error) {
-      console.error("Failed to add Shardeum network:", error);
+    } catch (err: any) {
+      if (err.code === 4001) throw new Error("User rejected network change");
+      throw err;
     }
   };
 
-  // Switch to Bankai Testnet
-  const switchToBankai = async () => {
-    if (!window.ethereum) return;
-    try {
-      const currentChainId = await window.ethereum.request({ method: "eth_chainId" });
-      if (currentChainId === BANKAI_CHAIN_ID) return; // Already on Bankai
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: BANKAI_CHAIN_ID }],
-      });
-    } catch (switchError: any) {
-      if (switchError.code === 4902) {
-        // Chain not added
-        await addShardeumNetwork();
-        await switchToBankai(); // try switching again
-      } else {
-        console.error("Failed to switch network. Make sure Bankai is added in MetaMask.", switchError);
-      }
-    }
-  };
-
-  // Connect wallet
+  // Connect wallet manually
   const connectWallet = async () => {
-    if (!window.ethereum) return alert("Please install MetaMask!");
-    await switchToBankai();
-
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
-    const signer = await provider.getSigner();
-    const address = await signer.getAddress();
-    setAccount(address);
-
-    const contractInstance = new ethers.Contract(CONTRACT_ADDRESS, CommunityHubABI, signer);
-    setContract(contractInstance);
+    try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      await switchToShardeum();
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      setWalletAddress(accounts[0]);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to connect wallet");
+    }
   };
 
-  // Create proposal
+  // Handle proposal creation
   const handleCreateProposal = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contract) return alert("Connect your wallet first!");
-    if (!description || !beneficiary) return alert("Please fill all fields!");
+    setError(null);
+    setTxHash(null);
+
+    if (!description || !beneficiary) {
+      setError("Please fill all fields");
+      return;
+    }
 
     try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
       setLoading(true);
+
+      // Ensure user is on Shardeum network
+      await switchToShardeum();
+
+      // Connect to Shardeum via MetaMask
+      const provider = new ethers.BrowserProvider(window.ethereum, "any");
+      const signer = await provider.getSigner();
+
+      const contract = new ethers.Contract(COMMUNITY_HUB_ADDRESS, COMMUNITY_HUB_ABI, signer);
+
+      // Send transaction (using SHM)
       const tx = await contract.createProposal(description, beneficiary);
+      setTxHash(tx.hash);
+
       await tx.wait();
-      alert("Proposal created successfully!");
       setDescription("");
       setBeneficiary("");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to create proposal.");
+    } catch (err: any) {
+      setError(err.message || "Transaction failed");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center py-10 px-4">
-      <WalletConnect connectWallet={connectWallet} account={account} />
+    <div className="min-h-screen bg-gray-50">
+      <main className="max-w-2xl mx-auto p-6">
+        <h1 className="text-4xl font-bold text-black mb-6 text-center">
+          Create a Proposal
+        </h1>
 
-      <div className="w-full max-w-lg bg-white p-8 rounded-xl shadow-md">
-        <h2 className="text-2xl font-bold mb-6 text-center">Create a Proposal</h2>
+        {!walletAddress ? (
+          <div className="text-center mb-6">
+            <button
+              onClick={connectWallet}
+              className="px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition"
+            >
+              Connect Wallet
+            </button>
+            {error && <p className="text-red-500 mt-2">{error}</p>}
+          </div>
+        ) : (
+          <p className="text-black mb-4 text-center">
+            Connected wallet: {walletAddress}
+          </p>
+        )}
 
-        <form onSubmit={handleCreateProposal} className="space-y-4">
+        <form onSubmit={handleCreateProposal} className="space-y-4 bg-white p-6 rounded-lg shadow">
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Description</label>
+            <label className="block mb-1 font-semibold text-black">Proposal Description</label>
             <textarea
+              className="w-full p-3 border rounded-lg text-black"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full border border-gray-300 rounded-md p-2"
-              placeholder="Describe your proposal..."
-              required
+              rows={4}
+              placeholder="Enter your proposal description"
             />
           </div>
 
           <div>
-            <label className="block text-gray-700 font-medium mb-1">Beneficiary Address</label>
+            <label className="block mb-1 font-semibold text-black">Beneficiary Wallet Address</label>
             <input
               type="text"
+              className="w-full p-3 border rounded-lg text-black"
               value={beneficiary}
               onChange={(e) => setBeneficiary(e.target.value)}
-              className="w-full border border-gray-300 rounded-md p-2"
               placeholder="0x..."
-              required
             />
           </div>
+
+          {error && <p className="text-red-500">{error}</p>}
+          {txHash && (
+            <p className="text-green-600">
+              Proposal created! Tx:{" "}
+              <a
+                href={`https://explorer.testnet.shardeum.org/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline"
+              >
+                {txHash}
+              </a>
+            </p>
+          )}
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 transition"
+            className={`w-full px-6 py-3 text-white rounded-lg transition ${
+              loading ? "bg-gray-400 cursor-not-allowed" : "bg-black hover:bg-gray-800"
+            }`}
+            disabled={loading || !walletAddress}
           >
             {loading ? "Creating..." : "Create Proposal"}
           </button>
         </form>
-      </div>
+      </main>
     </div>
   );
-}
+};
+
+export default CreateProposalPage;

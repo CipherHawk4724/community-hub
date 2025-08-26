@@ -1,165 +1,201 @@
+// app/donate/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
-import WalletConnect from "../../components/WalletConnect";
-import ProposalCard from "../../components/ProposalCard";
+import Navbar from "components/Navbar";
 
-const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
-const SHARDEUM_CHAIN_ID = "0x1F40"; // 8080 in hex
+// Deployed CommunityHub contract address
+const COMMUNITY_HUB_ADDRESS = "0xd927807767655E6e818af8EBbCf6cf41890E253c";
 
-import CommunityHubABI from "../../abi/CommunityHub.json";
+// Minimal ABI for fetching proposals and donating
+const COMMUNITY_HUB_ABI = [
+  "function listProposals(uint256 fromId, uint256 toId) external view returns (tuple(uint256 id,address creator,address payable beneficiary,string description,uint256 votesYes,uint256 votesNo,uint256 donated,uint256 createdAt,bool open)[])",
+  "function donate(uint256 id) external payable"
+];
 
-interface Proposal {
+type Proposal = {
   id: number;
   creator: string;
   beneficiary: string;
   description: string;
   votesYes: number;
   votesNo: number;
-  donated: string;
+  donated: bigint;
   createdAt: number;
   open: boolean;
-}
+};
 
-export default function DonatePage() {
-  const [account, setAccount] = useState<string>("");
-  const [contract, setContract] = useState<ethers.Contract | null>(null);
+
+const DonatePage: React.FC = () => {
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [amount, setAmount] = useState<string>("0");
+  const [selectedProposalId, setSelectedProposalId] = useState<number | null>(null);
+  const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const addShardeumNetwork = async () => {
-    if (!window.ethereum) return;
-    try {
-      await window.ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: SHARDEUM_CHAIN_ID,
-            chainName: "Shardeum Unstablenet",
-            rpcUrls: ["https://api-unstable.shardeum.org"],
-            nativeCurrency: { name: "SHM", symbol: "SHM", decimals: 18 },
-            blockExplorerUrls: ["https://explorer-unstable.shardeum.org/"],
-          },
-        ],
-      });
-    } catch (error) {
-      console.error(error);
+  // Auto-connect wallet
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.request({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          if (accounts.length > 0) setWalletAddress(accounts[0]);
+        })
+        .catch(console.error);
     }
-  };
+  }, []);
 
-  const switchToShardeum = async () => {
-    if (!window.ethereum) return;
-    try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: SHARDEUM_CHAIN_ID }],
-      });
-    } catch (switchError: any) {
-      if (switchError.code === 4902) {
-        await addShardeumNetwork();
-      } else {
-        console.error(switchError);
-      }
-    }
-  };
-
+  // Connect wallet manually
   const connectWallet = async () => {
-    if (!window.ethereum) return alert("Install MetaMask!");
-    await switchToShardeum();
-
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
-    const signer = await provider.getSigner();
-    const address = await signer.getAddress();
-    setAccount(address);
-
-    const contractInstance = new ethers.Contract(
-      CONTRACT_ADDRESS,
-      CommunityHubABI,
-      signer
-    );
-    setContract(contractInstance);
+    try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      setWalletAddress(accounts[0]);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to connect wallet");
+    }
   };
 
+  // Fetch proposals from contract
   const fetchProposals = async () => {
-    if (!contract) return;
     try {
-      const list = await contract.listProposals(1, 100);
-      const formatted: Proposal[] = list.map((p: any) => ({
-        id: Number(p.id),
-        creator: p.creator,
-        beneficiary: p.beneficiary,
-        description: p.description,
-        votesYes: Number(p.votesYes),
-        votesNo: Number(p.votesNo),
-        donated: ethers.formatEther(p.donated),
-        createdAt: Number(p.createdAt),
-        open: p.open,
-      }));
-      setProposals(formatted);
-    } catch (err) {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      const provider = new ethers.BrowserProvider(window.ethereum, "any");
+      const contract = new ethers.Contract(COMMUNITY_HUB_ADDRESS, COMMUNITY_HUB_ABI, provider);
+      
+      // For simplicity, fetch proposals 1-20
+      const results: Proposal[] = await contract.listProposals(1, 20);
+      setProposals(results);
+    } catch (err: any) {
       console.error(err);
+      setError("Failed to fetch proposals");
     }
   };
 
   useEffect(() => {
-    if (contract) fetchProposals();
-  }, [contract]);
+    fetchProposals();
+  }, []);
 
-  const handleDonate = async (id: number) => {
-    if (!contract) return;
+  // Handle donation
+  const handleDonate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setTxHash(null);
+
+    if (!selectedProposalId || !amount) {
+      setError("Please select a proposal and enter an amount");
+      return;
+    }
+
     try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
       setLoading(true);
-      const tx = await contract.donate(id, { value: ethers.parseEther(amount) });
+
+      const provider = new ethers.BrowserProvider(window.ethereum, "any");
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(COMMUNITY_HUB_ADDRESS, COMMUNITY_HUB_ABI, signer);
+
+      const tx = await contract.donate(selectedProposalId, {
+        value: ethers.parseEther(amount)
+      });
+
+      setTxHash(tx.hash);
       await tx.wait();
-      alert("Donation successful!");
-      setAmount("0");
+
+      setAmount("");
+      setSelectedProposalId(null);
       fetchProposals();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Donation failed.");
+      setError(err.message || "Transaction failed");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4">
-      <WalletConnect connectWallet={connectWallet} account={account} />
+    <div className="min-h-screen bg-gray-50">
+      <main className="max-w-3xl mx-auto p-6">
+        <h1 className="text-4xl font-bold text-blue-600 mb-6 text-center">
+          Donate to a Proposal
+        </h1>
 
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">Donate to Proposals</h1>
-
-        {proposals.length === 0 ? (
-          <p className="text-center text-gray-500">No proposals available for donation.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {proposals.map((proposal) => (
-              <div key={proposal.id}>
-                <ProposalCard proposal={proposal} contract={contract} />
-                <div className="flex mt-2 gap-2">
-                  <input
-                    type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="ETH amount"
-                    className="flex-1 border border-gray-300 rounded-md p-2"
-                  />
-                  <button
-                    onClick={() => handleDonate(proposal.id)}
-                    disabled={loading || !amount || Number(amount) <= 0}
-                    className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition"
-                  >
-                    {loading ? "Processing..." : "Donate"}
-                  </button>
-                </div>
-              </div>
-            ))}
+        {!walletAddress ? (
+          <div className="text-center mb-6">
+            <button
+              onClick={connectWallet}
+              className="px-6 py-3 bg-blue-600 text-black rounded-lg hover:bg-blue-700 transition"
+            >
+              Connect Wallet
+            </button>
+            {error && <p className="text-red-500 mt-2">{error}</p>}
           </div>
+        ) : (
+          <p className="text-gray-700 mb-4 text-center">
+            Connected wallet: {walletAddress}
+          </p>
         )}
-      </div>
+
+<form onSubmit={handleDonate} className="space-y-4 bg-white p-6 rounded-lg shadow">
+  <div>
+    <label className="block mb-1 font-semibold text-black">Select Proposal</label>
+    <select
+      className="w-full p-3 border rounded-lg text-black"
+      value={selectedProposalId ?? ""}
+      onChange={(e) => setSelectedProposalId(Number(e.target.value))}
+    >
+      <option value="">-- Select Proposal --</option>
+      {proposals.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.id} - {p.description.slice(0, 50)} {p.open ? "(Open)" : "(Closed)"}
+        </option>
+      ))}
+    </select>
+  </div>
+
+  <div>
+    <label className="block mb-1 font-semibold text-black">Amount (SHM)</label>
+    <input
+      type="number"
+      step="0.01"
+      className="w-full p-3 border rounded-lg text-black"
+      value={amount}
+      onChange={(e) => setAmount(e.target.value)}
+      placeholder="Enter amount in SHM"
+    />
+  </div>
+
+  {error && <p className="text-red-500">{error}</p>}
+  {txHash && (
+    <p className="text-green-600">
+      Donation successful! Tx:{" "}
+      <a
+        href={`https://explorer.testnet.shardeum.org/tx/${txHash}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="underline text-black"
+      >
+        {txHash}
+      </a>
+    </p>
+  )}
+
+  <button
+    type="submit"
+    className={`w-full px-6 py-3 text-white rounded-lg transition ${
+      loading ? "bg-gray-400 cursor-not-allowed" : "bg-black hover:bg-gray-800"
+    }`}
+    disabled={loading || !walletAddress}
+  >
+    {loading ? "Donating..." : "Donate"}
+  </button>
+</form>
+      </main>
     </div>
   );
-}
+};
+
+export default DonatePage;

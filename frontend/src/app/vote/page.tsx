@@ -1,151 +1,180 @@
+// app/vote/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
-import WalletConnect from "../../components/WalletConnect";
-import ProposalCard from "../../components/ProposalCard";
+import Navbar from "components/Navbar";
 
-const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
-const SHARDEUM_CHAIN_ID = "0x1F40"; // 8080 in hex
+// Deployed CommunityHub contract address
+const COMMUNITY_HUB_ADDRESS = "0xd927807767655E6e818af8EBbCf6cf41890E253c";
 
-import CommunityHubABI from "../../abi/CommunityHub.json";
+// Minimal ABI for proposals and voting
+const COMMUNITY_HUB_ABI = [
+  "function listProposals(uint256 fromId, uint256 toId) external view returns (tuple(uint256 id,address creator,address payable beneficiary,string description,uint256 votesYes,uint256 votesNo,uint256 donated,uint256 createdAt,bool open)[])",
+  "function vote(uint256 id, bool support) external"
+];
 
-interface Proposal {
+type Proposal = {
   id: number;
   creator: string;
   beneficiary: string;
   description: string;
   votesYes: number;
   votesNo: number;
-  donated: string;
+  donated: bigint; 
   createdAt: number;
   open: boolean;
-}
+};
 
-export default function VotePage() {
-  const [account, setAccount] = useState<string>("");
-  const [contract, setContract] = useState<ethers.Contract | null>(null);
+const VotePage: React.FC = () => {
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const addShardeumNetwork = async () => {
-    if (!window.ethereum) return;
-    try {
-      await window.ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [
-          {
-            chainId: SHARDEUM_CHAIN_ID,
-            chainName: "Shardeum Unstablenet",
-            rpcUrls: ["https://api-unstable.shardeum.org"],
-            nativeCurrency: { name: "SHM", symbol: "SHM", decimals: 18 },
-            blockExplorerUrls: ["https://explorer-unstable.shardeum.org/"],
-          },
-        ],
-      });
-    } catch (error) {
-      console.error("Failed to add Shardeum network:", error);
+  // Auto-connect wallet
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.request({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          if (accounts.length > 0) setWalletAddress(accounts[0]);
+        })
+        .catch(console.error);
     }
-  };
+  }, []);
 
-  const switchToShardeum = async () => {
-    if (!window.ethereum) return;
-    try {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: SHARDEUM_CHAIN_ID }],
-      });
-    } catch (switchError: any) {
-      if (switchError.code === 4902) {
-        await addShardeumNetwork();
-      } else {
-        console.error("Failed to switch network:", switchError);
-      }
-    }
-  };
-
+  // Connect wallet manually
   const connectWallet = async () => {
-    if (!window.ethereum) return alert("Install MetaMask!");
-    await switchToShardeum();
-
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send("eth_requestAccounts", []);
-    const signer = await provider.getSigner();
-    const address = await signer.getAddress();
-    setAccount(address);
-
-    const contractInstance = new ethers.Contract(
-      CONTRACT_ADDRESS,
-      CommunityHubABI,
-      signer
-    );
-    setContract(contractInstance);
+    try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      setWalletAddress(accounts[0]);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to connect wallet");
+    }
   };
 
+  // Fetch proposals from contract
   const fetchProposals = async () => {
-    if (!contract) return;
     try {
-      const list = await contract.listProposals(1, 100);
-      const formatted: Proposal[] = list.map((p: any) => ({
-        id: Number(p.id),
-        creator: p.creator,
-        beneficiary: p.beneficiary,
-        description: p.description,
-        votesYes: Number(p.votesYes),
-        votesNo: Number(p.votesNo),
-        donated: ethers.formatEther(p.donated),
-        createdAt: Number(p.createdAt),
-        open: p.open,
-      }));
-      setProposals(formatted);
-    } catch (err) {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      const provider = new ethers.BrowserProvider(window.ethereum, "any");
+      const contract = new ethers.Contract(COMMUNITY_HUB_ADDRESS, COMMUNITY_HUB_ABI, provider);
+      
+      // For simplicity, fetch proposals 1-20
+      const results: Proposal[] = await contract.listProposals(1, 20);
+      setProposals(results);
+    } catch (err: any) {
       console.error(err);
+      setError("Failed to fetch proposals");
     }
   };
 
   useEffect(() => {
-    if (contract) fetchProposals();
-  }, [contract]);
+    fetchProposals();
+  }, []);
 
-  const handleVote = async (id: number, support: boolean) => {
-    if (!contract) return;
+  // Handle voting
+  const handleVote = async (proposalId: number, support: boolean) => {
     try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
       setLoading(true);
-      const tx = await contract.vote(id, support);
+      setError(null);
+      setTxHash(null);
+
+      const provider = new ethers.BrowserProvider(window.ethereum, "any");
+      const signer = await provider.getSigner();
+      const contract = new ethers.Contract(COMMUNITY_HUB_ADDRESS, COMMUNITY_HUB_ABI, signer);
+
+      const tx = await contract.vote(proposalId, support);
+      setTxHash(tx.hash);
       await tx.wait();
-      alert("Vote submitted successfully!");
-      fetchProposals();
-    } catch (err) {
+
+      fetchProposals(); // Refresh votes
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to vote.");
+      setError(err.message || "Transaction failed");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-8 px-4">
-      <WalletConnect connectWallet={connectWallet} account={account} />
+    <div className="min-h-screen bg-gray-50">
+      <main className="max-w-3xl mx-auto p-6">
+      <h1 className="text-4xl font-bold text-black mb-6 text-center">
+        Vote on Proposals
+      </h1>
 
-      <div className="max-w-5xl mx-auto">
-        <h1 className="text-3xl font-bold mb-6 text-center">Vote on Proposals</h1>
+      {!walletAddress ? (
+        <div className="text-center mb-6">
+          <button
+            onClick={connectWallet}
+            className="px-6 py-3 bg-black text-white rounded-lg hover:bg-gray-800 transition"
+          >
+            Connect Wallet
+          </button>
+          {error && <p className="text-red-500 mt-2">{error}</p>}
+        </div>
+      ) : (
+        <p className="text-black mb-4 text-center">
+          Connected wallet: {walletAddress}
+        </p>
+      )}
 
-        {proposals.length === 0 ? (
-          <p className="text-center text-gray-500">No proposals available for voting.</p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {proposals.map((proposal) => (
-              <ProposalCard
-                key={proposal.id}
-                proposal={proposal}
-                contract={contract}
-                onVote={handleVote}
-                loading={loading}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+    {error && <p className="text-red-500 mb-4">{error}</p>}
+    {txHash && (
+      <p className="text-green-600 mb-4">
+        Vote submitted! Tx:{" "}
+        <a
+          href={`https://explorer-unstable.shardeum.org/tx/${txHash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline text-black"
+        >
+          {txHash}
+        </a>
+      </p>
+    )}
+
+        <div className="space-y-4">
+          {proposals.map((p) => (
+          <div key={p.id} className="bg-white p-4 rounded-lg shadow">
+            <h2 className="font-semibold text-lg mb-1 text-black">{p.description}</h2>
+              <p className="text-black text-sm mb-2">
+                Proposal ID: {p.id} | Beneficiary: {p.beneficiary}
+              </p>
+              <p className="text-gray-700 text-sm mb-2">
+                Votes: Yes {p.votesYes.toString()} | No {p.votesNo.toString()}
+              </p>
+              {p.open ? (
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => handleVote(p.id, true)}
+                    disabled={loading || !walletAddress}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:bg-gray-400"
+                  >
+                    Vote Yes
+                  </button>
+                  <button
+                    onClick={() => handleVote(p.id, false)}
+                    disabled={loading || !walletAddress}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition disabled:bg-gray-400"
+                  >
+                    Vote No
+                  </button>
+                </div>
+              ) : (
+              <p className="text-black">This proposal is closed.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </main>
     </div>
   );
-}
+};
+
+export default VotePage;

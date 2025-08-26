@@ -1,200 +1,160 @@
+// app/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { ethers } from "ethers";
-import CommunityHubAbi from "abi/CommunityHub.json";
+import Navbar from "components/Navbar";
+import Link from "next/link";
 
-const CONTRACT_ADDRESS = "0x065Cc1814f7c840301fA1a32a1F8298308c0DB74";
+// Contract info
+const COMMUNITY_HUB_ADDRESS = "0xd927807767655E6e818af8EBbCf6cf41890E253c";
 
-interface Proposal {
+// Minimal ABI for proposals
+const COMMUNITY_HUB_ABI = [
+  "function listProposals(uint256 fromId, uint256 toId) external view returns (tuple(uint256 id,address creator,address payable beneficiary,string description,uint256 votesYes,uint256 votesNo,uint256 donated,uint256 createdAt,bool open)[])"
+];
+
+type Proposal = {
   id: number;
   creator: string;
   beneficiary: string;
   description: string;
   votesYes: number;
   votesNo: number;
-  donated: string;
+  donated: bigint;
   createdAt: number;
   open: boolean;
-}
+};
 
-export default function Home() {
-  const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
-  const [signer, setSigner] = useState<ethers.Signer | null>(null);
-  const [contract, setContract] = useState<ethers.Contract | null>(null);
+
+const HomePage: React.FC = () => {
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [description, setDescription] = useState("");
-  const [beneficiary, setBeneficiary] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Connect MetaMask wallet
+  // Auto-connect wallet
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.request({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          if (accounts.length > 0) setWalletAddress(accounts[0]);
+        })
+        .catch(console.error);
+    }
+  }, []);
+
+  // Connect wallet manually
   const connectWallet = async () => {
-    if ((window as any).ethereum) {
-      const ethProvider = new ethers.BrowserProvider((window as any).ethereum);
-      await ethProvider.send("eth_requestAccounts", []);
-      setProvider(ethProvider);
-      const signer = await ethProvider.getSigner();
-      setSigner(signer);
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, CommunityHubAbi, signer);
-      setContract(contract);
-    } else {
-      alert("Please install MetaMask!");
+    try {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      setWalletAddress(accounts[0]);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message || "Failed to connect wallet");
     }
   };
 
-  // Fetch proposals using listProposals
+  // Fetch proposals from contract
   const fetchProposals = async () => {
-    if (!contract) return;
     try {
-      // Fetch proposals 1-20 for example
-      const proposalsData = await contract.listProposals(1, 20);
-      const temp: Proposal[] = proposalsData.map((p: any) => ({
-        id: Number(p.id),
-        creator: p.creator,
-        beneficiary: p.beneficiary,
-        description: p.description,
-        votesYes: Number(p.votesYes),
-        votesNo: Number(p.votesNo),
-        donated: ethers.formatEther(p.donated),
-        createdAt: Number(p.createdAt),
-        open: p.open,
-      }));
-      setProposals(temp.reverse());
-    } catch (err) {
+      if (!window.ethereum) throw new Error("MetaMask not installed");
+      setLoading(true);
+      const provider = new ethers.BrowserProvider(window.ethereum, "any");
+      const contract = new ethers.Contract(COMMUNITY_HUB_ADDRESS, COMMUNITY_HUB_ABI, provider);
+
+      // Fetch proposals 1–20
+      const results: Proposal[] = await contract.listProposals(1, 20);
+      setProposals(results);
+    } catch (err: any) {
       console.error(err);
+      setError("Failed to fetch proposals");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (contract) fetchProposals();
-  }, [contract]);
-
-  // Create new proposal
-  const createProposal = async () => {
-    if (!contract || !description || !beneficiary) return;
-    try {
-      const tx = await contract.createProposal(description, beneficiary);
-      await tx.wait();
-      setDescription("");
-      setBeneficiary("");
-      fetchProposals();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Vote for a proposal
-  const vote = async (id: number, support: boolean) => {
-    if (!contract) return;
-    try {
-      const tx = await contract.vote(id, support);
-      await tx.wait();
-      fetchProposals();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  // Donate SHM tokens
-  const donate = async (id: number, amount: string) => {
-    if (!contract || !amount) return;
-    try {
-      const tx = await contract.donate(id, { value: ethers.parseEther(amount) });
-      await tx.wait();
-      fetchProposals();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+    fetchProposals();
+  }, []);
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <h1 className="text-3xl font-bold mb-4">Decentralized Community Hub</h1>
+    <div className="min-h-screen bg-gray-50">
+      <main className="max-w-5xl mx-auto p-6">
+        <h1 className="text-4xl font-bold text-blue-600 mb-6 text-center">
+          Community Hub Dashboard
+        </h1>
 
-      {!provider ? (
-        <button
-          onClick={connectWallet}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Connect Wallet
-        </button>
-      ) : (
-        <div>
-          {/* Create Proposal */}
-          <div className="bg-white p-4 rounded shadow mb-6">
-            <h2 className="text-xl font-semibold mb-2">Create Proposal</h2>
-            <input
-              type="text"
-              placeholder="Description"
-              className="border p-2 w-full mb-2 rounded"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder="Beneficiary Address"
-              className="border p-2 w-full mb-2 rounded"
-              value={beneficiary}
-              onChange={(e) => setBeneficiary(e.target.value)}
-            />
+        {!walletAddress ? (
+          <div className="text-center mb-6">
             <button
-              onClick={createProposal}
-              className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+              onClick={connectWallet}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
             >
-              Submit
+              Connect Wallet
             </button>
+            {error && <p className="text-red-500 mt-2">{error}</p>}
           </div>
+        ) : (
+          <p className="text-gray-700 mb-6 text-center">
+            Connected wallet: {walletAddress}
+          </p>
+        )}
 
-          {/* List Proposals */}
-          <div className="space-y-4">
-            {proposals.map((p) => (
-              <div key={p.id} className="bg-white p-4 rounded shadow">
-                <h3 className="font-semibold">{p.description}</h3>
-                <p>Creator: {p.creator}</p>
-                <p>Beneficiary: {p.beneficiary}</p>
-                <p>Votes: ✅ {p.votesYes} | ❌ {p.votesNo}</p>
-                <p>Donated: {p.donated} SHM</p>
-                <div className="flex space-x-2 mt-2">
-                  {p.open ? (
-                    <>
-                      <button
-                        onClick={() => vote(p.id, true)}
-                        className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
-                      >
-                        Vote Yes
-                      </button>
-                      <button
-                        onClick={() => vote(p.id, false)}
-                        className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
-                      >
-                        Vote No
-                      </button>
-                      <input
-                        type="text"
-                        placeholder="Amount (SHM)"
-                        className="border p-1 rounded w-24"
-                        id={`donate-${p.id}`}
-                      />
-                      <button
-                        onClick={() => {
-                          const input = document.getElementById(
-                            `donate-${p.id}`
-                          ) as HTMLInputElement;
-                          donate(p.id, input.value);
-                        }}
-                        className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600"
-                      >
-                        Donate
-                      </button>
-                    </>
-                  ) : (
-                    <span className="text-gray-500">Closed</span>
-                  )}
-                </div>
+        {loading && <p className="text-center text-gray-500 mb-4">Loading proposals...</p>}
+        {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
+
+        <div className="grid gap-6 md:grid-cols-2">
+          {proposals.map((p) => (
+            <div key={p.id} className="bg-white p-4 rounded-lg shadow">
+              <h2 className="font-semibold text-lg mb-2">{p.description}</h2>
+              <p className="text-gray-500 text-sm mb-1">
+                Proposal ID: {p.id} | Creator: {p.creator}
+              </p>
+              <p className="text-gray-500 text-sm mb-1">
+                Beneficiary: {p.beneficiary}
+              </p>
+              <p className="text-gray-700 text-sm mb-1">
+                Votes: Yes {p.votesYes.toString()} | No {p.votesNo.toString()}
+              </p>
+              <p className="text-gray-700 text-sm mb-2">
+                Total Donated: {ethers.formatEther(p.donated)} SHM
+              </p>
+              <p className="text-gray-500 text-xs mb-2">
+                {p.open ? "Status: Open" : "Status: Closed"}
+              </p>
+
+              <div className="flex gap-2 flex-wrap">
+                {p.open && (
+                  <>
+                    <Link
+                      href="/vote"
+                      className="px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+                    >
+                      Vote
+                    </Link>
+                    <Link
+                      href="/donate"
+                      className="px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition"
+                    >
+                      Donate
+                    </Link>
+                  </>
+                )}
+                <Link
+                  href={`/proposal/${p.id}`}
+                  className="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition"
+                >
+                  View
+                </Link>
               </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
-      )}
+      </main>
     </div>
   );
-}
+};
+
+export default HomePage;
