@@ -43,7 +43,7 @@ Our **Minimum Viable Product (MVP)** focuses on the essentials:
 ---
 
 ## ⚙️ Tech Stack
-- 🎨 **Front-end**: React  
+- 🎨 **Front-end**: Next js
 - 📝 **Smart Contracts**: Solidity  
 - ⛓️ **Blockchain**: Shardeum  
 - 👛 **Wallet Integration**: Ethers.js  
