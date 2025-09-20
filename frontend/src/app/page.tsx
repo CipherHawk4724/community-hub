@@ -80,7 +80,7 @@ const HomePage: React.FC = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-100">
       <main className="max-w-5xl mx-auto p-6">
         <h1 className="text-4xl font-bold text-blue-600 mb-6 text-center">
           Community Hub Dashboard
@@ -97,20 +97,33 @@ const HomePage: React.FC = () => {
             {error && <p className="text-red-500 mt-2">{error}</p>}
           </div>
         ) : (
-          <p className="text-gray-700 mb-6 text-center">
-            Connected wallet: {walletAddress}
-          </p>
+          // 🚩 ADDRESS OVERFLOW FIX APPLIED HERE
+          <div className="text-center mb-6 p-4 border rounded-lg bg-white shadow-sm">
+            <p className="text-gray-700 font-semibold flex items-center justify-center">
+              Connected wallet:
+              <span 
+                  className="ml-2 font-mono text-sm max-w-[200px] sm:max-w-xs md:max-w-md 
+                             overflow-hidden whitespace-nowrap text-ellipsis"
+                >
+                {walletAddress}
+              </span>
+            </p>
+          </div>
         )}
 
         {loading && <p className="text-center text-gray-500 mb-4">Loading proposals...</p>}
         {error && <p className="text-red-500 mb-4 text-center">{error}</p>}
 
+        <h2 className="text-3xl font-bold text-gray-800 mb-4 mt-8">
+            Active Proposals
+        </h2>
+
         <div className="grid gap-6 md:grid-cols-2">
           {proposals.map((p) => (
             <div key={p.id} className="bg-white p-4 rounded-lg shadow">
-              <h2 className="font-semibold text-lg mb-2">{p.description}</h2>
+              <h2 className="font-bold text-lg text-black mb-2">{p.description}</h2>
               <p className="text-gray-500 text-sm mb-1">
-                Proposal ID: {p.id} | Creator: {p.creator}
+                Proposal ID: {p.id}<br/>Creator: {p.creator}
               </p>
               <p className="text-gray-500 text-sm mb-1">
                 Beneficiary: {p.beneficiary}

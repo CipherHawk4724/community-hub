@@ -117,7 +117,7 @@ const DonatePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-100">
       <main className="max-w-3xl mx-auto p-6">
         <h1 className="text-4xl font-bold text-blue-600 mb-6 text-center">
           Donate to a Proposal
@@ -134,9 +134,17 @@ const DonatePage: React.FC = () => {
             {error && <p className="text-red-500 mt-2">{error}</p>}
           </div>
         ) : (
-          <p className="text-gray-700 mb-4 text-center">
-            Connected wallet: {walletAddress}
+<div className="text-center mb-6 p-4 border rounded-lg bg-white shadow-sm">
+          <p className="text-black font-semibold flex items-center justify-center">
+            Connected wallet:
+            <span 
+                className="ml-2 font-mono text-sm max-w-[200px] sm:max-w-xs md:max-w-md 
+                           overflow-hidden whitespace-nowrap text-ellipsis"
+              >
+              {walletAddress}
+            </span>
           </p>
+        </div>
         )}
 
 <form onSubmit={handleDonate} className="space-y-4 bg-white p-6 rounded-lg shadow">

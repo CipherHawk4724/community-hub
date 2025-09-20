@@ -110,7 +110,7 @@ const CreateProposalPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-100">
       <main className="max-w-2xl mx-auto p-6">
         <h1 className="text-4xl font-bold text-black mb-6 text-center">
           Create a Proposal
@@ -127,9 +127,17 @@ const CreateProposalPage: React.FC = () => {
             {error && <p className="text-red-500 mt-2">{error}</p>}
           </div>
         ) : (
-          <p className="text-black mb-4 text-center">
-            Connected wallet: {walletAddress}
-          </p>
+<div className="text-center mb-6 p-4 border rounded-lg bg-white shadow-sm">
+            <p className="text-black font-semibold flex items-center justify-center">
+              Connected wallet:
+              <span 
+                  className="ml-2 font-mono text-sm max-w-[200px] sm:max-w-xs 
+                             overflow-hidden whitespace-nowrap text-ellipsis"
+                >
+                {walletAddress}
+              </span>
+            </p>
+          </div>
         )}
 
         <form onSubmit={handleCreateProposal} className="space-y-4 bg-white p-6 rounded-lg shadow">

@@ -76,7 +76,7 @@ const VotePage: React.FC = () => {
     fetchProposals();
   }, []);
 
-  // Handle voting
+  // Handle voting (Now with robust error handling)
   const handleVote = async (proposalId: number, support: boolean) => {
     try {
       if (!window.ethereum) throw new Error("MetaMask not installed");
@@ -94,15 +94,36 @@ const VotePage: React.FC = () => {
 
       fetchProposals(); // Refresh votes
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Transaction failed");
+      console.error("Full Transaction Error Object:", err);
+      
+      // 🚩 ROBUST ERROR FILTERING LOGIC
+      let userFriendlyMessage = "Transaction failed. Please check wallet for details and try again.";
+
+      // 1. Check for Ethers v6 specific error property (shortMessage)
+      if (err.shortMessage) {
+          userFriendlyMessage = `Vote failed: ${err.shortMessage.split('(')[0].trim()}`;
+      } 
+      // 2. Check for the specific JSON-RPC error code (Internal Error/Revert)
+      else if (err.code === 4001) {
+          userFriendlyMessage = "Transaction rejected by user.";
+      } 
+      // 3. Catch the verbose message containing the -32603 code (RPC Revert/Internal Error)
+      else if (err.message && (err.message.includes("-32603") || err.message.includes("Internal JSON-RPC error"))) {
+          userFriendlyMessage = "Vote failed: The smart contract rejected the transaction (e.g., already voted, proposal closed, or insufficient voting power).";
+      } 
+      // 4. Final Fallback (If the error is uncaught, display a generic message)
+      else {
+          userFriendlyMessage = "Transaction could not be processed. Insufficient funds or network error.";
+      }
+      
+      setError(userFriendlyMessage);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-100">
       <main className="max-w-3xl mx-auto p-6">
       <h1 className="text-4xl font-bold text-black mb-6 text-center">
         Vote on Proposals
@@ -119,14 +140,23 @@ const VotePage: React.FC = () => {
           {error && <p className="text-red-500 mt-2">{error}</p>}
         </div>
       ) : (
-        <p className="text-black mb-4 text-center">
-          Connected wallet: {walletAddress}
-        </p>
+<div className="text-center mb-6 p-4 border rounded-lg bg-white shadow-sm">
+          <p className="text-black font-semibold flex items-center justify-center">
+            Connected wallet:
+            <span 
+                className="ml-2 font-mono text-sm max-w-[200px] sm:max-w-xs md:max-w-md 
+                           overflow-hidden whitespace-nowrap text-ellipsis"
+              >
+              {walletAddress}
+            </span>
+          </p>
+        </div>
       )}
 
-    {error && <p className="text-red-500 mb-4">{error}</p>}
+    {/* This displays your simplified error message */}
+    {error && <p className="text-red-500 mb-4 text-center font-semibold">{error}</p>}
     {txHash && (
-      <p className="text-green-600 mb-4">
+      <p className="text-green-600 mb-4 text-center">
         Vote submitted! Tx:{" "}
         <a
           href={`https://explorer-unstable.shardeum.org/tx/${txHash}`}
@@ -173,6 +203,9 @@ const VotePage: React.FC = () => {
           ))}
         </div>
       </main>
+      <div className="text-center mt-8">
+        <a href="/" className="text-blue-600 hover:underline">← Back to Dashboard</a>
+      </div>
     </div>
   );
 };
